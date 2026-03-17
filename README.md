@@ -1,0 +1,2 @@
+# gufoshapes
+gUFO SHACL Shapes
