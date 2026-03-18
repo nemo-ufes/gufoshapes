@@ -7,7 +7,7 @@
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 @prefix owl: <http://www.w3.org/2002/07/owl#> .
 
-@prefix gufoshape: <https://w3id.org/nemo/gufoshapes#> .
+@prefix gufoshapes: <https://w3id.org/nemo/gufoshapes#> .
 
 # Ensures that Rigid or Semi-Rigid types (like Kinds, Categories) do not specialize Anti-Rigid types (like Roles, Phases), as this would violate the rigidity constraints.
 gufoshapes:RigidOrSemiRigidShape a sh:NodeShape ;
