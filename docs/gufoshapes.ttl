@@ -1,3 +1,20 @@
+# gufoshapes-updated.ttl
+#
+# Single SHACL shapes file combining:
+#
+#   Part 1 - All shapes from gufoshapes.ttl (copied unchanged).
+#   Part 2 - SHACL-SPARQL constraint versions of the zero-result validation
+#            queries in gufo-queries/ (Listings 12-18 of Guizzardi et al. (2021),
+#            "Types and taxonomic structures in conceptual modeling: A novel
+#            ontological theory and engineering support", Data & Knowledge
+#            Engineering 134).
+#
+# The query-based shapes assume the data graph contains the ontology under
+# validation together with gUFO (gufo.ttl), as assembled by main.py. Each
+# original SELECT query was rewritten so that the violating node is bound to
+# $this (the focus node); the offending related node, when there is one, is
+# projected as ?value so it shows up as sh:value in the validation report.
+
 @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix sh: <http://www.w3.org/ns/shacl#> .
@@ -8,6 +25,18 @@
 @prefix owl: <http://www.w3.org/2002/07/owl#> .
 
 @prefix gufoshapes: <https://w3id.org/nemo/gufoshapes#> .
+
+# Shared SPARQL prefix declarations for the query-based shapes in Part 2.
+<https://w3id.org/nemo/gufoshapes> a owl:Ontology ;
+  sh:declare
+    [ sh:prefix "rdf" ; sh:namespace "http://www.w3.org/1999/02/22-rdf-syntax-ns#"^^xsd:anyURI ] ,
+    [ sh:prefix "rdfs" ; sh:namespace "http://www.w3.org/2000/01/rdf-schema#"^^xsd:anyURI ] ,
+    [ sh:prefix "owl" ; sh:namespace "http://www.w3.org/2002/07/owl#"^^xsd:anyURI ] ,
+    [ sh:prefix "gufo" ; sh:namespace "http://purl.org/nemo/gufo#"^^xsd:anyURI ] .
+
+#################################################################
+# Part 1 - Shapes from gufoshapes.ttl
+#################################################################
 
 # Ensures that Rigid or Semi-Rigid types (like Kinds, Categories) do not specialize Anti-Rigid types (like Roles, Phases), as this would violate the rigidity constraints.
 gufoshapes:RigidOrSemiRigidShape a sh:NodeShape ;
@@ -67,22 +96,29 @@ gufoshapes:BaseSortalShape a sh:NodeShape ;
   .
 
   # Prevents Kinds (which supply identity) from specializing other Sortals (which carry identity), as Kinds must be the top-most sortals rooted in a taxonomy.
+  # OWL-RL adds the reflexive triple C rdfs:subClassOf C for every class. That triple is not a
+  # specialization of another sortal, so the focus node is excluded from ?value.
   gufoshapes:KindShape a sh:NodeShape ;
   sh:targetClass gufo:Kind ;
-  sh:property [
+  sh:sparql [
+    a sh:SPARQLConstraint ;
     sh:name "Forbidden sortal specialization" ;
-    sh:message "Kinds cannot specialize sortal types (i.e., types that already set or inherit an identity principle)." ;
-    sh:path rdfs:subClassOf ;
-    sh:not [
-      sh:or (
-        [ sh:class gufo:SubKind ]
-        [ sh:class gufo:Phase ]
-        [ sh:class gufo:Role ]
-        [ sh:class gufo:Kind ]
-      )
-    ]
-  ]
-  .
+    sh:message "Kinds cannot specialize sortal types (i.e., types that already set or inherit an identity principle). Offending superclass: {?value}." ;
+    sh:prefixes [
+      sh:declare [ sh:prefix "gufo" ; sh:namespace "http://purl.org/nemo/gufo#"^^xsd:anyURI ; ] ;
+      sh:declare [ sh:prefix "rdf" ; sh:namespace "http://www.w3.org/1999/02/22-rdf-syntax-ns#"^^xsd:anyURI ; ] ;
+      sh:declare [ sh:prefix "rdfs" ; sh:namespace "http://www.w3.org/2000/01/rdf-schema#"^^xsd:anyURI ; ]
+    ] ;
+    sh:select """
+      SELECT DISTINCT $this ?value
+      WHERE {
+        $this rdfs:subClassOf ?value .
+        FILTER (?value != $this)
+        ?value rdf:type ?sortal .
+        FILTER (?sortal IN (gufo:Kind, gufo:SubKind, gufo:Phase, gufo:Role))
+      }
+    """ ;
+  ] .
 
   # Ensures Endurant types do not accidentally specialize classes disjoint from the domain of Endurants (like Events, Situations, etc.).
   gufoshapes:EndurantTypeShape a sh:NodeShape ;
@@ -179,4 +215,200 @@ gufoshapes:BaseSortalShape a sh:NodeShape ;
             }
         """ ;
     ] .
-    
+
+#################################################################
+# Part 2 - Shapes derived from the SPARQL queries in gufo-queries/
+#################################################################
+
+# From listing-12a-only-one-ontouml-stereotype-types.rq (Listing 12a).
+# A type may carry at most one of the OntoUML/gUFO type stereotypes
+# (Category, RoleMixin, PhaseMixin, Mixin, Kind, SubKind, Role, Phase).
+gufoshapes:OnlyOneOntoumlStereotypeTypesShape a sh:NodeShape ;
+  sh:targetClass gufo:Category, gufo:RoleMixin, gufo:PhaseMixin, gufo:Mixin, gufo:Kind, gufo:SubKind, gufo:Role, gufo:Phase ;
+  sh:sparql [
+    a sh:SPARQLConstraint ;
+    sh:message "Type has more than one OntoUML/gUFO type stereotype; one of the conflicting stereotypes is {?value}." ;
+    sh:prefixes <https://w3id.org/nemo/gufoshapes> ;
+    sh:select """
+        SELECT DISTINCT $this ?value
+        WHERE {
+            $this rdf:type ?stereotype , ?value .
+            FILTER (?stereotype IN (gufo:Category, gufo:RoleMixin, gufo:PhaseMixin, gufo:Mixin, gufo:Kind, gufo:SubKind, gufo:Role, gufo:Phase))
+            FILTER (?value IN (gufo:Category, gufo:RoleMixin, gufo:PhaseMixin, gufo:Mixin, gufo:Kind, gufo:SubKind, gufo:Role, gufo:Phase))
+            FILTER (?stereotype != ?value)
+        }
+    """ ;
+  ] .
+
+# From listing-12b-only-one-ontouml-stereotype-endurants.rq (Listing 12b).
+# A type may specialize at most one of the (disjoint) endurant ultimate
+# categories: gufo:Object, gufo:Relator, gufo:Quality, gufo:ExtrinsicMode,
+# gufo:IntrinsicMode.
+#
+# Revised: scope to endurant types (cf. Listing 12a and EndurantTypeShape),
+# exclude OWL built-ins and blank nodes, and use transitive specialization.
+gufoshapes:OnlyOneOntoumlStereotypeEndurantsShape a sh:NodeShape ;
+  sh:targetClass
+    gufo:EndurantType,
+    gufo:NonRigidType, gufo:AntiRigidType, gufo:RigidType, gufo:SemiRigidType,
+    gufo:Phase, gufo:PhaseMixin, gufo:Role, gufo:RoleMixin, gufo:Mixin,
+    gufo:NonSortal, gufo:Category, gufo:Sortal, gufo:Kind, gufo:SubKind ;
+  sh:sparql [
+    a sh:SPARQLConstraint ;
+    sh:message "Type specializes more than one of the disjoint endurant categories (gufo:Object, gufo:Relator, gufo:Quality, gufo:ExtrinsicMode, gufo:IntrinsicMode); one of the conflicting categories is {?value}." ;
+    sh:prefixes <https://w3id.org/nemo/gufoshapes> ;
+    sh:select """
+        SELECT DISTINCT $this ?value
+        WHERE {
+            FILTER (isIRI($this))
+            FILTER ($this NOT IN (owl:Nothing, owl:Thing))
+            $this rdfs:subClassOf+ ?endurantCategory .
+            $this rdfs:subClassOf+ ?value .
+            FILTER (?endurantCategory IN (gufo:Object, gufo:Relator, gufo:Quality, gufo:ExtrinsicMode, gufo:IntrinsicMode))
+            FILTER (?value IN (gufo:Object, gufo:Relator, gufo:Quality, gufo:ExtrinsicMode, gufo:IntrinsicMode))
+            FILTER (?endurantCategory != ?value)
+        }
+    """ ;
+  ] .
+
+# From listing-13-sortal-must-specialize-ultimate-sortal.rq (Listing 13).
+# Every sortal (SubKind, Phase, Role) must directly or indirectly specialize
+# an ultimate sortal (gufo:Kind), which supplies its identity principle.
+gufoshapes:SortalMustSpecializeUltimateSortalShape a sh:NodeShape ;
+  sh:targetClass gufo:SubKind, gufo:Phase, gufo:Role ;
+  sh:sparql [
+    a sh:SPARQLConstraint ;
+    sh:message "Sortal type does not (directly or indirectly) specialize an ultimate sortal (gufo:Kind)." ;
+    sh:prefixes <https://w3id.org/nemo/gufoshapes> ;
+    sh:select """
+        SELECT DISTINCT $this
+        WHERE {
+            $this rdf:type ?sortalStereotype .
+            FILTER (?sortalStereotype IN (gufo:SubKind, gufo:Phase, gufo:Role))
+            FILTER NOT EXISTS {
+                $this rdfs:subClassOf* ?ultimateSortal .
+                ?ultimateSortal rdf:type gufo:Kind .
+            }
+        }
+    """ ;
+  ] .
+
+# From listing-14-ultimate-sortal-cant-specialize-another.rq (Listing 14).
+# An ultimate sortal (gufo:Kind) cannot specialize another ultimate sortal,
+# since each kind supplies its own identity principle.
+# OWL-RL adds the reflexive triple C rdfs:subClassOf C for every class, and
+# rdfs:subClassOf+ matches it. The focus node is not another ultimate sortal.
+gufoshapes:UltimateSortalCantSpecializeAnotherShape a sh:NodeShape ;
+  sh:targetClass gufo:Kind ;
+  sh:sparql [
+    a sh:SPARQLConstraint ;
+    sh:message "Ultimate sortal (gufo:Kind) specializes another ultimate sortal: {?value}." ;
+    sh:prefixes <https://w3id.org/nemo/gufoshapes> ;
+    sh:select """
+        SELECT DISTINCT $this ?value
+        WHERE {
+            $this rdf:type gufo:Kind .
+            $this rdfs:subClassOf+ ?value .
+            ?value rdf:type gufo:Kind .
+            FILTER (?value != $this)
+        }
+    """ ;
+  ] .
+
+# From listing-15-cant-specialize-more-than-one-ultimate-sortal.rq (Listing 15).
+# A sortal (SubKind, Phase, Role) cannot directly or indirectly specialize
+# more than one ultimate sortal (gufo:Kind), as it would inherit more than one
+# identity principle.
+gufoshapes:CantSpecializeMoreThanOneUltimateSortalShape a sh:NodeShape ;
+  sh:targetClass gufo:SubKind, gufo:Phase, gufo:Role ;
+  sh:sparql [
+    a sh:SPARQLConstraint ;
+    sh:message "Sortal type specializes more than one ultimate sortal (gufo:Kind); one of them is {?value}." ;
+    sh:prefixes <https://w3id.org/nemo/gufoshapes> ;
+    sh:select """
+        SELECT DISTINCT $this ?value
+        WHERE {
+            $this rdf:type ?sortalStereotype .
+            FILTER (?sortalStereotype IN (gufo:SubKind, gufo:Phase, gufo:Role))
+            $this rdfs:subClassOf+ ?value .
+            ?value rdf:type gufo:Kind .
+            $this rdfs:subClassOf+ ?otherUltimateSortal .
+            ?otherUltimateSortal rdf:type gufo:Kind .
+            FILTER (?value != ?otherUltimateSortal)
+        }
+    """ ;
+  ] .
+
+# From listing-16-rigid-and-semirigid-cant-specialize-antirigid.rq (Listing 16).
+# Rigid and semi-rigid types cannot directly or indirectly specialize
+# anti-rigid types. Unlike gufoshapes:RigidOrSemiRigidShape above (which
+# checks direct superclasses), this constraint traverses the whole
+# specialization chain.
+gufoshapes:RigidAndSemiRigidCantSpecializeAntiRigidShape a sh:NodeShape ;
+  sh:targetClass gufo:RigidType, gufo:Category, gufo:Kind, gufo:SubKind, gufo:SemiRigidType, gufo:Mixin ;
+  sh:sparql [
+    a sh:SPARQLConstraint ;
+    sh:message "Rigid or semi-rigid type (directly or indirectly) specializes the anti-rigid type {?value}." ;
+    sh:prefixes <https://w3id.org/nemo/gufoshapes> ;
+    sh:select """
+        SELECT DISTINCT $this ?value
+        WHERE {
+            { $this rdf:type/rdfs:subClassOf* gufo:RigidType . }
+            UNION
+            { $this rdf:type/rdfs:subClassOf* gufo:SemiRigidType . }
+            $this rdfs:subClassOf+ ?value .
+            ?value rdf:type/rdfs:subClassOf* gufo:AntiRigidType .
+        }
+    """ ;
+  ] .
+
+# From listing-17-nonsortal-cant-specialize-sortal.rq (Listing 17).
+# Non-sortals cannot directly or indirectly specialize sortals, since a
+# non-sortal must not inherit an identity principle. Unlike
+# gufo:NonSortalShape above (which checks direct superclasses), this
+# constraint traverses the whole specialization chain.
+gufoshapes:NonSortalCantSpecializeSortalShape a sh:NodeShape ;
+  sh:targetClass gufo:NonSortal, gufo:Category, gufo:PhaseMixin, gufo:RoleMixin, gufo:Mixin ;
+  sh:sparql [
+    a sh:SPARQLConstraint ;
+    sh:message "Non-sortal type (directly or indirectly) specializes the sortal type {?value}." ;
+    sh:prefixes <https://w3id.org/nemo/gufoshapes> ;
+    sh:select """
+        SELECT DISTINCT $this ?value
+        WHERE {
+            $this rdf:type/rdfs:subClassOf* gufo:NonSortal .
+            $this rdfs:subClassOf+ ?value .
+            ?value rdf:type/rdfs:subClassOf* gufo:Sortal .
+        }
+    """ ;
+  ] .
+
+# From listing-18-nonsortal-must-have-sortal-specialization.rq (Listing 18).
+# Every non-sortal must be (directly or indirectly) specialized by at least
+# one sortal, possibly through another non-sortal that gathers its instances.
+gufoshapes:NonSortalMustHaveSortalSpecializationShape a sh:NodeShape ;
+  sh:targetClass gufo:NonSortal, gufo:Category, gufo:PhaseMixin, gufo:RoleMixin, gufo:Mixin ;
+  sh:sparql [
+    a sh:SPARQLConstraint ;
+    sh:message "Non-sortal type is not (directly or indirectly) specialized by any sortal." ;
+    sh:prefixes <https://w3id.org/nemo/gufoshapes> ;
+    sh:select """
+        SELECT DISTINCT $this
+        WHERE {
+            $this rdf:type/rdfs:subClassOf* gufo:NonSortal .
+            FILTER NOT EXISTS {
+                {
+                    ?sortal rdf:type/rdfs:subClassOf* gufo:Sortal .
+                    ?sortal rdfs:subClassOf* $this .
+                }
+                UNION
+                {
+                    ?otherNonSortal rdf:type/rdfs:subClassOf* gufo:NonSortal .
+                    ?sortal rdf:type/rdfs:subClassOf* gufo:Sortal .
+                    ?sortal rdfs:subClassOf+ ?otherNonSortal .
+                    $this rdfs:subClassOf+ ?otherNonSortal .
+                }
+            }
+        }
+    """ ;
+  ] .
